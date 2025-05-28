@@ -1,0 +1,2 @@
+version.o: version.cc siddefs.h
+siddefs.h:
