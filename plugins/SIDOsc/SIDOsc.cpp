@@ -52,16 +52,16 @@ SIDOsc::SIDOsc()
     voice[1].set_sync_source(&voice[0]);
     voice[2].set_sync_source(&voice[1]);
 
-    // Remove filter and envelope initialization.
+    // Filter and envelope init for later
     // filter.set_chip_model(MOS6581);
     // filter.enable_filter(true);
     // extFilter.enable_filter(true);
 
-    // Potentiometers remain (if used internally by reSID).
+    // Potentiometers (possibly used internally by reSID).
     potX.readPOT();
     potY.readPOT();
 
-    // Remove envelope defaults.
+    // Envelope defaults for later
     // for (int v = 0; v < 3; v++) {
     //     voice[v].envelope.reset();
     //     voice[v].envelope.writeATTACK_DECAY(0x00);
@@ -80,7 +80,7 @@ void SIDOsc::next(int nSamples) {
     const int   dacType      = static_cast<int>(in0(3));  // Unused for now.
     const float gateInput    = in0(4);
 
-    // Remove envelope parameters.
+    // Envelope parameters for later
     // float attackInput  = (mNumInputs > 7)  ? in0(7)  : 0.0f;
     // float decayInput   = (mNumInputs > 8)  ? in0(8)  : 0.0f;
     // float sustainInput = (mNumInputs > 9)  ? in0(9)  : 1.0f;
@@ -99,7 +99,7 @@ void SIDOsc::next(int nSamples) {
         }
         mPrevGate = currentGate;
     }
-    // (Envelope updates removed.)
+    // TODO: ADD Envelope updates
 
     // --- Frequency and oscillator update ---
     const float freqEpsilon = 0.001f;
@@ -133,7 +133,7 @@ void SIDOsc::next(int nSamples) {
             sumVoiceOutput += static_cast<float>(voice[v].wave.output() - voice[v].getWaveZero());
         }
         float mixedOutput = sumVoiceOutput / 3.0f;
-        // Remove filter and envelope processing.
+       
         float finalOutput = (mixedOutput / kOutNorm * mGain);
         outputBuffer[i] = finalOutput;
     }
