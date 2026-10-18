@@ -80,14 +80,11 @@ void SIDOsc::next(int nSamples) {
     const int   dacType        = static_cast<int>(std::lround(in0(DacType)));
     const bool gateInput       = in0(Gate) > 0.0f;
     const bool freqIsAudioRate = (inRate(Freq) == calc_FullRate);
-    const float attackInput    = (mNumInputs > 7) ? in0(7) : 0.0f;
-    
+    const float attackInput    = (mNumInputs > 5) ? in0(5) : 0.0f;
+    const float decayInput     = (mNumInputs > 6) ? in0(6) : 0.0f;
+    const float sustainInput   = (mNumInputs > 7) ? in0(7) : 1.0f;
+    const float releaseInput   = (mNumInputs > 8) ? in0(8) : 1.0f;
 
-    // Envelope parameters for later
-    // float attackInput  = (mNumInputs > 7)  ? in0(7)  : 0.0f;
-    // float decayInput   = (mNumInputs > 8)  ? in0(8)  : 0.0f;
-    // float sustainInput = (mNumInputs > 9)  ? in0(9)  : 1.0f;
-    // float releaseInput = (mNumInputs > 10) ? in0(10) : 1.0f;
 
     mGain = gainInput;
 
