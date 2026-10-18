@@ -20,7 +20,6 @@ class SIDOsc : public SCUnit {
 public:
     SIDOsc();
     ~SIDOsc() = default;
-
     // SID-specific operations.
     reSID::reg8 readRegister(reSID::reg8 offset);
     void writeRegister(reSID::reg8 offset, reSID::reg8 value);
@@ -30,6 +29,8 @@ public:
 
 private:
     void next(int nSamples);
+    // Input enum for clarity
+    enum Input {Freq = 0, Gain, Waveform, DacType, Gate, Attack, Decay, Sustain, Release};
 
     // Control-rate gain parameter.
     float mGain;

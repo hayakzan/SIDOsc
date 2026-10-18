@@ -74,11 +74,14 @@ SIDOsc::SIDOsc()
 
 void SIDOsc::next(int nSamples) {
     // --- Read primary parameters (from the input buffers) ---
-    const float* freqInput   = in(0);
-    const float gainInput    = in0(1);
-    const int   waveformType = static_cast<int>(in0(2));
-    const int   dacType      = static_cast<int>(in0(3));  // Unused for now.
-    const float gateInput    = in0(4);
+    const float* freqInput     = in(Freq);
+    const float gainInput      = in0(Gain); // in0(0) is shorthand for in(0)[0], which is the first sample of the first input
+    const int   waveformType   = static_cast<int>(std::lround(in0(Waveform)));
+    const int   dacType        = static_cast<int>(std::lround(in0(DacType)));
+    const bool gateInput       = in0(Gate) > 0.0f;
+    const bool freqIsAudioRate = (inRate(Freq) == calc_FullRate);
+    const float attackInput    = (mNumInputs > 7) ? in0(7) : 0.0f;
+    
 
     // Envelope parameters for later
     // float attackInput  = (mNumInputs > 7)  ? in0(7)  : 0.0f;
@@ -104,8 +107,9 @@ void SIDOsc::next(int nSamples) {
     // --- Frequency and oscillator update ---
     const float freqEpsilon = 0.001f;
     float* outputBuffer = this->out(0);
-    for (int i = 0; i < nSamples; ++i) {
-        float freq = (inRate(0) == calc_FullRate) ? freqInput[i] : in0(0);
+    for (int i = 0; i < nSamples; ++i) { //nSamples is the block size, not the hardware buffer size
+        float freq = freqIsAudioRate ? freqInput[i] : freqInput[0]; // if frequency is audio rate, read a fresh value per sample, 
+                                                                    // otherwise use the single block value, which is also refreshed each block    
         if (freq <= 0.0f) {
             outputBuffer[i] = 0.0f;
             continue;
