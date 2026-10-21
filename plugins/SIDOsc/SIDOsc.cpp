@@ -1,38 +1,65 @@
-#define SC_USE_DEPRECATED 1
 #include "SIDOsc.hpp"
-#include "envelope.h"
-#include <cstdio>
-#include <cmath>
 #include <algorithm>
-
-using namespace reSID;
+#include <cmath>
 
 static InterfaceTable* ft;
 
 namespace SIDOsc {
 
+// ---------------------------------------------------------------------------
 // Constants
-static constexpr double kClockFreq    = 985248.0; // PAL SID clock
-//static constexpr double kClockFreq = 1022727.0;  // NTSC SID clock
+// ---------------------------------------------------------------------------
 
-static constexpr double kAccResolution = 16777216.0; // = 2^24, 24-bit fixed-point phase accumulator
+static constexpr double kClockFreq = 985248.0;    // PAL SID clock
+// static constexpr double kClockFreq = 1022727.0; // NTSC SID clock
 
-//In the original reSID code, the analog filter (VCF) integrators and feedback loops are implemented in fixed‑point with an 11‑bit fractional resolution. 
-// Internally, filter state variables are scaled by 2048 so that the C‑code can stay in integer arithmetic
-static constexpr int    kFilterRes    = 2048; // = 2^11
-static constexpr int    kDACMaxValue  = 4095; // = 2^12-1, the full‑scale count of a 12‑bit DAC
-static constexpr int    kOutNorm      = 32767; // = 2^15-1, the max pos value of a signed 16‑bit sample. After we sum the three voices’ 12‑bit outputs, 
-                                               // we divide by kOutNorm to map into the conventional signed‑16 range (−1.0…+1.0 in float)
+static constexpr double kAccResolution = 16777216.0; // = 2^24, for 24-bit fixed-point phase accumulator that stands for one oscillator cycle
 
-// First arg: reference voltage
-// Second arg: termination‑resistor flag Boolean -- the final termination resistor in the DAC ladder causes a little bump/distortion near full‑scale
-const reSID::DAC<12> SIDOsc::dac6581(2.20, false); // that’s the nominal peak amplitude you get out of a real MOS 6581’s resistor ladder.
-const reSID::DAC<12> SIDOsc::dac8580(2.00, true); // it's less here because of the addition of the termination-resistor
+// SID register offsets (voice 1 and the global volume register).
+// makes reading easier:
+// writeReg(CONTROL, control);      // with the enum
+// writeReg(0x04, control);         // without: what's 0x04 again?
 
-// Helper: if input index is beyond mNumInputs, return a default.
-static inline float getInputDefault(SCUnit* unit, int index, float def) {
-    return (index < unit->mNumInputs) ? unit->in0(index) : def;
+enum Reg : reSID::reg8 {
+    FREQ_LO = 0x00,
+    FREQ_HI = 0x01,
+    PW_LO = 0x02,
+    PW_HI = 0x03,
+    CONTROL = 0x04,
+    ATTACK_DECAY = 0x05,
+    SUSTAIN_RELEASE = 0x06,
+    RES_FILT = 0x17,
+    MODE_VOL = 0x18,
+};
+
+//Envelope generation: The SID doesn’t understand seconds. Its envelope registers accept a 4-bit number per stage, 0 to 15, and each number selects one of 16 fixed speeds built into the chip.
+// “the user asked for a 0.4 s attack, which of the 16 numbers is closest?” To answer that, you need to know which time each number stands for, and that’s all kAttackSec is. nearestRateNibble() walks through it and picks the best match.
+// this also implies that in SC the user cannot set a 2s attack, it will snap into 3s.
+
+// Attack time in seconds for each nibble value 0..15 (datasheet values).
+// Decay and release use the same rates, three times slower.
+static constexpr float kAttackSec[16] = { 0.002f, 0.008f, 0.016f, 0.024f, 0.038f, 0.056f, 0.068f, 0.080f,
+                                          0.100f, 0.250f, 0.500f, 0.800f, 1.0f,   3.0f,   5.0f,   8.0f };
+    
+// Nearest nibble for a time in seconds. Compared as ratios (log space),
+// because the table is roughly exponential: 0.4 s should snap to 0.5 s.
+static int nearestRateNibble(float seconds) {
+    const float s = std::max(seconds, 1e-4f);
+    int best = 0;
+    float bestErr = INFINITY;
+    for (int n = 0; n < 16; ++n) {
+        const float err = std::fabs(std::log(s / kAttackSec[n]));
+        if (err < bestErr) {
+            bestErr = err;
+            best = n;
+        }
+    }
+    return best;
 }
+
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
 
 SIDOsc::SIDOsc()
     : mGain(1.0f)
