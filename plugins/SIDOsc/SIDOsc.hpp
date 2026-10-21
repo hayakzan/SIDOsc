@@ -1,24 +1,29 @@
 #pragma once
 
 #include "SC_PlugIn.hpp"
-#include "wave.h"
-#include "dac.h"
-#include "voice.h"
 #include "sid.h"
-#include "filter.h"
-#include "spline.h"
-#include "extfilt.h"
-#include "pot.h"
-#include "envelope.h"
-#include <vector>
-#include <array>
-#include <algorithm>
 
 namespace SIDOsc {
 
 class SIDOsc : public SCUnit {
 public:
     SIDOsc();
+
+    // Input order. Must match the argument order of multiNew() in SIDOsc.sc.
+    enum Input {
+        Freq = 0,   // Hz, any rate (audio rate = per-sample pitch)
+        Gain,       // linear output gain, control rate
+        Waveform,   // 1 = triangle, 2 = saw, 4 = pulse, 8 = noise (combinable)
+        PulseWidth, // 0..1, used by the pulse waveform
+        Gate,       // > 0 = note on (attack/decay/sustain), 0 = release
+        Attack,     // seconds, snapped to the nearest SID attack rate
+        Decay,      // seconds, snapped to the nearest SID decay rate
+        Sustain,    // 0..1, fraction of peak
+        Release,    // seconds, snapped to the nearest SID release rate
+        ChipModel,  // 0 = MOS6581, 1 = MOS8580 (read once, at synth start)
+        NumInputs
+    };
+
     ~SIDOsc() = default;
     // SID-specific operations.
     reSID::reg8 readRegister(reSID::reg8 offset);
