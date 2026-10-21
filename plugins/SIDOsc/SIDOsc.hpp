@@ -61,7 +61,9 @@ private:
     
     // Persistent previous frequency.
     float mPrevFreq;
-    
+    double mCyclesPerSample; // SID clock ticks per audio sample (~22.34 for 44.1 kHz and PAL clock)
+    double mCycleLeftover; // leftover fraction carried between samples
+
     // Cache for the previous gate value and envelope parameter values.
     bool mPrevGate;
     //commout

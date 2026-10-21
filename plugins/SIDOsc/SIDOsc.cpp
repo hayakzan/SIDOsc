@@ -16,10 +16,13 @@ static constexpr double kClockFreq    = 985248.0; // PAL SID clock
 //static constexpr double kClockFreq = 1022727.0;  // NTSC SID clock
 
 static constexpr double kAccResolution = 16777216.0; // = 2^24, 24-bit fixed-point phase accumulator
-//In the original reSID code, the analog filter (VCF) integrators and feedback loops are implemented in fixed‑point with an 11‑bit fractional resolution. Internally, filter state variables are scaled by 2048 so that the C‑code can stay in integer arithmetic
+
+//In the original reSID code, the analog filter (VCF) integrators and feedback loops are implemented in fixed‑point with an 11‑bit fractional resolution. 
+// Internally, filter state variables are scaled by 2048 so that the C‑code can stay in integer arithmetic
 static constexpr int    kFilterRes    = 2048; // = 2^11
 static constexpr int    kDACMaxValue  = 4095; // = 2^12-1, the full‑scale count of a 12‑bit DAC
-static constexpr int    kOutNorm      = 32767; // = 2^15-1, the max pos value of a signed 16‑bit sample. After we sum the three voices’ 12‑bit outputs, we divide by kOutNorm to map into the conventional signed‑16 range (−1.0…+1.0 in float)
+static constexpr int    kOutNorm      = 32767; // = 2^15-1, the max pos value of a signed 16‑bit sample. After we sum the three voices’ 12‑bit outputs, 
+                                               // we divide by kOutNorm to map into the conventional signed‑16 range (−1.0…+1.0 in float)
 
 // First arg: reference voltage
 // Second arg: termination‑resistor flag Boolean -- the final termination resistor in the DAC ladder causes a little bump/distortion near full‑scale
@@ -36,11 +39,10 @@ SIDOsc::SIDOsc()
     , freqValue(0)
     , mPrevControlReg(0xFF)
     , mPrevGate(false)
-    // Envelope parameters removed:
-    // , mPrevAttackInput(-1.0f)
-    // , mPrevDecayInput(-1.0f)
-    // , mPrevSustainInput(-1.0f)
-    // , mPrevReleaseInput(-1.0f)
+    , mPrevAttackInput(-1.0f)
+    , mPrevDecayInput(-1.0f)
+    , mPrevSustainInput(-1.0f)
+    , mPrevReleaseInput(-1.0f)
     , mPrevFreq(-1.0f)
 {
     // Initialize three voices.
@@ -61,14 +63,17 @@ SIDOsc::SIDOsc()
     potX.readPOT();
     potY.readPOT();
 
-    // Envelope defaults for later
-    // for (int v = 0; v < 3; v++) {
-    //     voice[v].envelope.reset();
-    //     voice[v].envelope.writeATTACK_DECAY(0x00);
-    //     voice[v].envelope.writeSUSTAIN_RELEASE(0xFF);
-    // }
-    
+    // Envelope defaults
+    for (int v = 0; v < 3; v++) {
+        voice[v].envelope.reset();
+        voice[v].envelope.writeATTACK_DECAY(0x00);
+        voice[v].envelope.writeSUSTAIN_RELEASE(0xFF);
+    }
+    mCyclesPerSample = kClockFreq / sampleRate();
+    mCycleLeftover = 0.0;
     mCalcFunc = make_calc_function<SIDOsc, &SIDOsc::next>();
+    
+
     next(1);
 }
 
@@ -99,7 +104,6 @@ void SIDOsc::next(int nSamples) {
         }
         mPrevGate = currentGate;
     }
-    // TODO: ADD Envelope updates
 
     // --- Frequency and oscillator update ---
     const float freqEpsilon = 0.001f;
@@ -119,16 +123,15 @@ void SIDOsc::next(int nSamples) {
             }
             mPrevFreq = freq;
         }
-        // Clock the oscillators.
-        for (int v = 0; v < 3; v++) {
-            voice[v].wave.clock();
-        }
-        for (int v = 0; v < 3; v++) {
-            voice[v].wave.synchronize();
-        }
-        for (int v = 0; v < 3; v++) {
-            voice[v].wave.set_waveform_output();
-        }
+        // Carry fractional SID ticks between samples so the emulated clock (and pitch) stays exact.
+        mCycleLeftover += mCyclesPerSample; // 22.34
+        const reSID::cycle_count dt = (reSID::cycle_count)mCycleLeftover; // integer part of cycles to clock -- 22
+        mCycleLeftover -= dt; // keep the fractional part for the next sample -- 0.34
+
+        for (int v = 0; v < 3; v++) voice[v].wave.clock(dt);
+        for (int v = 0; v < 3; v++) voice[v].wave.synchronize();
+        for (int v = 0; v < 3; v++) voice[v].wave.set_waveform_output(dt);
+    
         float sumVoiceOutput = 0.0f;
         for (int v = 0; v < 3; v++) {
             sumVoiceOutput += static_cast<float>(voice[v].wave.output() - voice[v].getWaveZero());
