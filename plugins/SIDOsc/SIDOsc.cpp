@@ -61,48 +61,40 @@ static int nearestRateNibble(float seconds) {
 // Constructor
 // ---------------------------------------------------------------------------
 
-SIDOsc::SIDOsc()
-    : mGain(1.0f)
-    , freqValue(0)
-    , mPrevControlReg(0xFF)
-    , mPrevGate(false)
-    , mPrevAttackInput(-1.0f)
-    , mPrevDecayInput(-1.0f)
-    , mPrevSustainInput(-1.0f)
-    , mPrevReleaseInput(-1.0f)
-    , mPrevFreq(-1.0f)
-{
-    // Initialize three voices.
-    for (int v = 0; v < 3; v++) {
-        voice[v].set_chip_model(MOS6581);
-    }
-    // Link voices for sync.
-    voice[0].set_sync_source(&voice[2]);
-    voice[1].set_sync_source(&voice[0]);
-    voice[2].set_sync_source(&voice[1]);
-
-    // Filter and envelope init for later
-    // filter.set_chip_model(MOS6581);
-    // filter.enable_filter(true);
-    // extFilter.enable_filter(true);
-
-    // Potentiometers (possibly used internally by reSID).
-    potX.readPOT();
-    potY.readPOT();
-
-    // Envelope defaults
-    for (int v = 0; v < 3; v++) {
-        voice[v].envelope.reset();
-        voice[v].envelope.writeATTACK_DECAY(0x00);
-        voice[v].envelope.writeSUSTAIN_RELEASE(0xFF);
-    }
-    mCyclesPerSample = kClockFreq / sampleRate();
-    mCycleLeftover = 0.0;
-    mCalcFunc = make_calc_function<SIDOsc, &SIDOsc::next>();
+SIDOsc::SIDOsc():
+    mCycleLeftover(0.0), //brought this up here
+    mPrevFreqReg(-1),
+    mPrevPulseReg(-1),
+    mPrevControl(-1),
+    mPrevAttackDecay(-1),
+    mPrevSustainRelease(-1) {
+        
+    // We don't set sync source here, it's done by reSID.
+        //such as voice[0].set_sync_source(&voice[2]); etc.
     
+    // Envelope has never been used - it's delegated to reSID here as well.
+        //so no env defaults here
 
+    // Chip model is fixed for the synth's life: it changes the chip's analog
+    // character (filter curve, combined waveforms, DC offset).
+    const bool is8580 = in0(ChipModel) > 0.5f;
+    sid.set_chip_model(is8580 ? reSID::MOS8580 : reSID::MOS6581);
+    sid.reset();
+
+    // Voice 1 straight to the output, not through the filter, volume at max.
+    writeReg(RES_FILT, 0x00);
+    writeReg(MODE_VOL, 0x0F);
+
+    // Advance the SID by clock/sampleRate ticks per audio sample.
+    mCyclesPerSample = kClockFreq / sampleRate();
+
+    mCalcFunc = make_calc_function<SIDOsc, &SIDOsc::next>();
     next(1);
 }
+
+// ---------------------------------------------------------------------------
+// Audio callback
+// ---------------------------------------------------------------------------
 
 void SIDOsc::next(int nSamples) {
     // --- Read primary parameters (from the input buffers) ---
