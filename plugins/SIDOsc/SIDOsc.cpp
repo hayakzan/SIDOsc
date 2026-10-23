@@ -20,6 +20,7 @@ static constexpr double kAccResolution = 16777216.0; // = 2^24, for 24-bit fixed
 // writeReg(CONTROL, control);      // with the enum
 // writeReg(0x04, control);         // without: what's 0x04 again?
 
+// defining only the low bytes: $D417 -> 0x17 because SID actually never sees the high bytes
 enum Reg : reSID::reg8 {
     FREQ_LO = 0x00,
     FREQ_HI = 0x01,
@@ -81,9 +82,11 @@ SIDOsc::SIDOsc():
     sid.set_chip_model(is8580 ? reSID::MOS8580 : reSID::MOS6581);
     sid.reset();
 
+    // sid.reset() clears the filter registers, including master volume
+        // set it, and route voice 1 around the filter.
     // Voice 1 straight to the output, not through the filter, volume at max.
-    writeReg(RES_FILT, 0x00);
-    writeReg(MODE_VOL, 0x0F);
+    writeReg(RES_FILT, 0x00); //FILT1 = 0, bypasses the filter
+    writeReg(MODE_VOL, 0x0F); //high nibble 0: no filter mode, low nibble F: master volume 15
 
     // Advance the SID by clock/sampleRate ticks per audio sample.
     mCyclesPerSample = kClockFreq / sampleRate();
