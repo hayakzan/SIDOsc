@@ -103,9 +103,7 @@ void SIDOsc::next(int nSamples) {
     // --- Read primary parameters (from the input buffers) ---
     const float* freqInput     = in(Freq);
     const float gainInput      = in0(Gain); // in0(0) is shorthand for in(0)[0], which is the first sample of the first input
-    const int   waveformType   = static_cast<int>(std::lround(in0(Waveform)));
     const int   dacType        = static_cast<int>(std::lround(in0(DacType)));
-    const bool gateInput       = in0(Gate) > 0.0f;
     const bool freqIsAudioRate = (inRate(Freq) == calc_FullRate);
     const float attackInput    = (mNumInputs > 5) ? in0(5) : 0.0f;
     const float decayInput     = (mNumInputs > 6) ? in0(6) : 0.0f;
@@ -116,15 +114,17 @@ void SIDOsc::next(int nSamples) {
     mGain = gainInput;
 
     // --- Build new control register (upper 4 bits: waveformType; bit0: gate) ---
-    bool currentGate = (gateInput > 0.5f);
-    reSID::reg8 newControlReg = static_cast<reSID::reg8>((waveformType << 4) | (currentGate ? 0x01 : 0x00));
+    // This  will come after the envelope registers, so a new note starts with the
+    // current ADSR settings.
+    // making sure that we take lower bits from the waveform input
+    const int waveformType = static_cast<int>(std::lround(in0(Waveform))) & 0x0F;
+    const bool gateInput = in0(Gate) > 0.0f;
+    const int controlReg = static_cast<reSID::reg8>((waveformType << 4) | (gate ? 0x01 : 0x00));
 
     // Update control registers on gate change.
     if (currentGate != mPrevGate) {
-        for (int v = 0; v < 3; v++) {
-            voice[v].writeCONTROL_REG(newControlReg);
-        }
-        mPrevGate = currentGate;
+        writeReg(CONTROL, static_cast<reSID::reg8>(control));
+        mPrevControl = control;
     }
 
     // --- Frequency and oscillator update ---
