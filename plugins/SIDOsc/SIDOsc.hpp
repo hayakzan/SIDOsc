@@ -24,14 +24,6 @@ public:
         NumInputs
     };
 
-    ~SIDOsc() = default;
-    // SID-specific operations.
-    reSID::reg8 readRegister(reSID::reg8 offset);
-    void writeRegister(reSID::reg8 offset, reSID::reg8 value);
-    //commout
-//    void configureFilter(bool enable, double bias);
-    void setSamplingParameters(double clockFreq = 985248.0, double sampleFreq = 44100.0);
-
 private:
     void next(int nSamples);
     // Input enum for clarity

@@ -20,6 +20,7 @@ static constexpr double kAccResolution = 16777216.0; // = 2^24, for 24-bit fixed
 // writeReg(CONTROL, control);      // with the enum
 // writeReg(0x04, control);         // without: what's 0x04 again?
 
+// defining only the low bytes: $D417 -> 0x17 because SID actually never sees the high bytes
 enum Reg : reSID::reg8 {
     FREQ_LO = 0x00,
     FREQ_HI = 0x01,
@@ -61,56 +62,48 @@ static int nearestRateNibble(float seconds) {
 // Constructor
 // ---------------------------------------------------------------------------
 
-SIDOsc::SIDOsc()
-    : mGain(1.0f)
-    , freqValue(0)
-    , mPrevControlReg(0xFF)
-    , mPrevGate(false)
-    , mPrevAttackInput(-1.0f)
-    , mPrevDecayInput(-1.0f)
-    , mPrevSustainInput(-1.0f)
-    , mPrevReleaseInput(-1.0f)
-    , mPrevFreq(-1.0f)
-{
-    // Initialize three voices.
-    for (int v = 0; v < 3; v++) {
-        voice[v].set_chip_model(MOS6581);
-    }
-    // Link voices for sync.
-    voice[0].set_sync_source(&voice[2]);
-    voice[1].set_sync_source(&voice[0]);
-    voice[2].set_sync_source(&voice[1]);
-
-    // Filter and envelope init for later
-    // filter.set_chip_model(MOS6581);
-    // filter.enable_filter(true);
-    // extFilter.enable_filter(true);
-
-    // Potentiometers (possibly used internally by reSID).
-    potX.readPOT();
-    potY.readPOT();
-
-    // Envelope defaults
-    for (int v = 0; v < 3; v++) {
-        voice[v].envelope.reset();
-        voice[v].envelope.writeATTACK_DECAY(0x00);
-        voice[v].envelope.writeSUSTAIN_RELEASE(0xFF);
-    }
-    mCyclesPerSample = kClockFreq / sampleRate();
-    mCycleLeftover = 0.0;
-    mCalcFunc = make_calc_function<SIDOsc, &SIDOsc::next>();
+SIDOsc::SIDOsc():
+    mCycleLeftover(0.0), //brought this up here
+    mPrevFreqReg(-1),
+    mPrevPulseReg(-1),
+    mPrevControl(-1),
+    mPrevAttackDecay(-1),
+    mPrevSustainRelease(-1) {
+        
+    // We don't set sync source here, it's done by reSID.
+        //such as voice[0].set_sync_source(&voice[2]); etc.
     
+    // Envelope has never been used - it's delegated to reSID here as well.
+        //so no env defaults here
 
+    // Chip model is fixed for the synth's life: it changes the chip's analog
+    // character (filter curve, combined waveforms, DC offset).
+    const bool is8580 = in0(ChipModel) > 0.5f;
+    sid.set_chip_model(is8580 ? reSID::MOS8580 : reSID::MOS6581);
+    sid.reset();
+
+    // sid.reset() clears the filter registers, including master volume
+        // set it, and route voice 1 around the filter.
+    // Voice 1 straight to the output, not through the filter, volume at max.
+    writeReg(RES_FILT, 0x00); //FILT1 = 0, bypasses the filter
+    writeReg(MODE_VOL, 0x0F); //high nibble 0: no filter mode, low nibble F: master volume 15
+
+    // Advance the SID by clock/sampleRate ticks per audio sample.
+    mCyclesPerSample = kClockFreq / sampleRate();
+
+    mCalcFunc = make_calc_function<SIDOsc, &SIDOsc::next>();
     next(1);
 }
+
+// ---------------------------------------------------------------------------
+// Audio callback
+// ---------------------------------------------------------------------------
 
 void SIDOsc::next(int nSamples) {
     // --- Read primary parameters (from the input buffers) ---
     const float* freqInput     = in(Freq);
     const float gainInput      = in0(Gain); // in0(0) is shorthand for in(0)[0], which is the first sample of the first input
-    const int   waveformType   = static_cast<int>(std::lround(in0(Waveform)));
     const int   dacType        = static_cast<int>(std::lround(in0(DacType)));
-    const bool gateInput       = in0(Gate) > 0.0f;
     const bool freqIsAudioRate = (inRate(Freq) == calc_FullRate);
     const float attackInput    = (mNumInputs > 5) ? in0(5) : 0.0f;
     const float decayInput     = (mNumInputs > 6) ? in0(6) : 0.0f;
@@ -121,15 +114,17 @@ void SIDOsc::next(int nSamples) {
     mGain = gainInput;
 
     // --- Build new control register (upper 4 bits: waveformType; bit0: gate) ---
-    bool currentGate = (gateInput > 0.5f);
-    reSID::reg8 newControlReg = static_cast<reSID::reg8>((waveformType << 4) | (currentGate ? 0x01 : 0x00));
+    // This  will come after the envelope registers, so a new note starts with the
+    // current ADSR settings.
+    // making sure that we take lower bits from the waveform input
+    const int waveformType = static_cast<int>(std::lround(in0(Waveform))) & 0x0F;
+    const bool gateInput = in0(Gate) > 0.0f;
+    const int controlReg = static_cast<reSID::reg8>((waveformType << 4) | (gate ? 0x01 : 0x00));
 
     // Update control registers on gate change.
     if (currentGate != mPrevGate) {
-        for (int v = 0; v < 3; v++) {
-            voice[v].writeCONTROL_REG(newControlReg);
-        }
-        mPrevGate = currentGate;
+        writeReg(CONTROL, static_cast<reSID::reg8>(control));
+        mPrevControl = control;
     }
 
     // --- Frequency and oscillator update ---
