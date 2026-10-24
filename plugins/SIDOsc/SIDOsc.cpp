@@ -15,11 +15,7 @@ static constexpr double kClockFreq = 985248.0;    // PAL SID clock
 
 static constexpr double kAccResolution = 16777216.0; // = 2^24, for 24-bit fixed-point phase accumulator that stands for one oscillator cycle
 
-// SID register offsets (voice 1 and the global volume register).
-// makes reading easier:
-// writeReg(CONTROL, control);      // with the enum
-// writeReg(0x04, control);         // without: what's 0x04 again?
-
+// SID register offsets (voice 1 and the global volume register)
 // defining only the low bytes: $D417 -> 0x17 because SID actually never sees the high bytes
 enum Reg : reSID::reg8 {
     FREQ_LO = 0x00,
@@ -85,8 +81,11 @@ SIDOsc::SIDOsc():
     // sid.reset() clears the filter registers, including master volume
         // set it, and route voice 1 around the filter.
     // Voice 1 straight to the output, not through the filter, volume at max.
-    writeReg(RES_FILT, 0x00); //FILT1 = 0, bypasses the filter
-    writeReg(MODE_VOL, 0x0F); //high nibble 0: no filter mode, low nibble F: master volume 15
+    // TODO: add writeReg later for 8581, 6581n doesn't need it
+        // writeReg(RES_FILT, 0x00); etc.
+    sid.write(RES_FILT, 0x00); // FILT1 = 0, bypasses the filter
+    sid.write(MODE_VOL, 0x0F); // //high nibble 0: no filter mode, low nibble F: master volume 15/
+        
 
     // Advance the SID by clock/sampleRate ticks per audio sample.
     mCyclesPerSample = kClockFreq / sampleRate();
@@ -94,6 +93,21 @@ SIDOsc::SIDOsc():
     mCalcFunc = make_calc_function<SIDOsc, &SIDOsc::next>();
     next(1);
 }
+
+
+// ---------------------------------------------------------------------------
+// Register write (to be implemented for 8581)
+// ---------------------------------------------------------------------------
+//
+//void SIDOsc::writeReg() {
+//}
+
+// ---------------------------------------------------------------------------
+// Frequency: Hz -> 16-bit register, written only when it changes
+// ---------------------------------------------------------------------------
+
+// the older version is about 22x wrong in terms of freq
+
 
 // ---------------------------------------------------------------------------
 // Audio callback
@@ -122,8 +136,8 @@ void SIDOsc::next(int nSamples) {
     const int controlReg = static_cast<reSID::reg8>((waveformType << 4) | (gate ? 0x01 : 0x00));
 
     // Update control registers on gate change.
-    if (currentGate != mPrevGate) {
-        writeReg(CONTROL, static_cast<reSID::reg8>(control));
+    if (controlReg != mPrevControl) {
+        sid.write(CONTROL, static_cast<reSID::reg8>(control));
         mPrevControl = control;
     }
 
