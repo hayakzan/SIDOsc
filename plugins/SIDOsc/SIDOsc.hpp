@@ -26,45 +26,21 @@ public:
 
 private:
     void next(int nSamples);
-    // Input enum for clarity
-    enum Input {Freq = 0, Gain, Waveform, DacType, Gate, Attack, Decay, Sustain, Release};
+    void writeFreq(float freq);
+//    void writeReg(reSID::reg8 reg, reSID::reg8 value);
 
-    // Control-rate gain parameter.
-    float mGain;
-
-    // Three voices (to emulate a full SID).
-    reSID::Voice voice[3];
-    
-    //commout
-    // Filter and external filter.
-//    reSID::Filter filter;
-//    reSID::ExternalFilter extFilter;
-
-    // Potentiometer instances.
-    reSID::Potentiometer potX, potY;
-
-    // Static DAC models.
-    static const reSID::DAC<12> dac6581; // For 6581
-    static const reSID::DAC<12> dac8580; // For 8580
-
-    // An instance of the full SID 
+    // An instance of the full SID
     reSID::SID sid;
-
-    // Persistent frequency register value.
-    volatile unsigned int freqValue;
-    
-    // Cache for the previous control register.
-    reSID::reg8 mPrevControlReg;
     
     // Persistent previous frequency.
-    float mPrevFreq;
     double mCyclesPerSample; // SID clock ticks per audio sample (~22.34 for 44.1 kHz and PAL clock)
     double mCycleLeftover; // leftover fraction carried between samples
 
-    // Cache for the previous gate value and envelope parameter values.
-    bool mPrevGate;
-    //commout
-//    float mPrevAttackInput, mPrevDecayInput, mPrevSustainInput, mPrevReleaseInput;
-};
+    // Last values written to each register, so we only write on change.
+    int mPrevFreqReg;
+    int mPrevPulseReg;
+    int mPrevControl;
+    int mPrevAttackDecay;
+    int mPrevSustainRelease;};
 
 } // namespace SIDOsc
