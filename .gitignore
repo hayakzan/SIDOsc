@@ -1,0 +1,19 @@
+# CMake build output (plugin binaries, install folder)
+build/
+
+# macOS
+.DS_Store
+
+# reSID build artifacts (from ./configure && make in resid/)
+resid/*.o
+resid/*.lo
+resid/.libs/
+resid/config.log
+resid/config.status
+resid/autom4te.cache/
+resid/libtool
+
+# Editors
+.vscode/
+.idea/
+*.swp

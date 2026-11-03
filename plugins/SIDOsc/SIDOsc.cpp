@@ -98,16 +98,19 @@ SIDOsc::SIDOsc():
 // ---------------------------------------------------------------------------
 // Register write (to be implemented for 8581)
 // ---------------------------------------------------------------------------
-//
-//void SIDOsc::writeReg() {
-//}
 
-// ---------------------------------------------------------------------------
-// Frequency: Hz -> 16-bit register, written only when it changes
-// ---------------------------------------------------------------------------
+// --- Frequency: Hz -> 16-bit register, written only when it changes ---
+void SIDOsc::writeFreq(float freq) {
+    // f = reg * clock / 2^24  ->  reg = f * 2^24 / clock
+    const double exact = static_cast<double>(freq) * kAccResolution / kClockFreq;
+    const int reg = static_cast<int>(std::clamp(std::lround(exact), 0L, 65535L));
 
-// the older version is about 22x wrong in terms of freq
-
+    if (reg != mPrevFreqReg) {
+        sid.write(FREQ_LO, static_cast<reSID::reg8>(reg & 0xFF));
+        sid.write(FREQ_HI, static_cast<reSID::reg8>((reg >> 8) & 0xFF));
+        mPrevFreqReg = reg;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Audio callback
@@ -116,69 +119,77 @@ SIDOsc::SIDOsc():
 void SIDOsc::next(int nSamples) {
     // --- Read primary parameters (from the input buffers) ---
     const float* freqInput     = in(Freq);
-    const float gainInput      = in0(Gain); // in0(0) is shorthand for in(0)[0], which is the first sample of the first input
-    const int   dacType        = static_cast<int>(std::lround(in0(DacType)));
-    const bool freqIsAudioRate = (inRate(Freq) == calc_FullRate);
-    const float attackInput    = (mNumInputs > 5) ? in0(5) : 0.0f;
-    const float decayInput     = (mNumInputs > 6) ? in0(6) : 0.0f;
-    const float sustainInput   = (mNumInputs > 7) ? in0(7) : 1.0f;
-    const float releaseInput   = (mNumInputs > 8) ? in0(8) : 1.0f;
+    const bool freqIsAudioRate = isAudioRateIn(Freq);
+    const float gainInput      = in0(Gain); // first sample of the gain input, read once per block (control rate)
+    float* outputBuffer        = out(0);
 
-
-    mGain = gainInput;
-
-    // --- Build new control register (upper 4 bits: waveformType; bit0: gate) ---
-    // This  will come after the envelope registers, so a new note starts with the
-    // current ADSR settings.
-    // making sure that we take lower bits from the waveform input
-    const int waveformType = static_cast<int>(std::lround(in0(Waveform))) & 0x0F;
-    const bool gateInput = in0(Gate) > 0.0f;
-    const int controlReg = static_cast<reSID::reg8>((waveformType << 4) | (gate ? 0x01 : 0x00));
-
-    // Update control registers on gate change.
-    if (controlReg != mPrevControl) {
-        sid.write(CONTROL, static_cast<reSID::reg8>(control));
-        mPrevControl = control;
+    // --- Frequency (control rate: once per block, audio rate: per sample, in the loop) ---
+    if (!freqIsAudioRate) {
+        writeFreq(freqInput[0]);
     }
 
-    // --- Frequency and oscillator update ---
-    const float freqEpsilon = 0.001f;
-    float* outputBuffer = this->out(0);
-    for (int i = 0; i < nSamples; ++i) { //nSamples is the block size, not the hardware buffer size
-        float freq = freqIsAudioRate ? freqInput[i] : freqInput[0]; // if frequency is audio rate, read a fresh value per sample, 
-                                                                    // otherwise use the single block value, which is also refreshed each block    
-        if (freq <= 0.0f) {
-            outputBuffer[i] = 0.0f;
-            continue;
-        }
-        if (fabs(freq - mPrevFreq) > freqEpsilon) {
-            this->freqValue = static_cast<unsigned int>((freq * kAccResolution) / kClockFreq);
-            for (int v = 0; v < 3; v++) {
-                voice[v].wave.writeFREQ_LO(static_cast<reSID::reg8>(this->freqValue & 0xFF));
-                voice[v].wave.writeFREQ_HI(static_cast<reSID::reg8>((this->freqValue >> 8) & 0xFF));
-            }
-            mPrevFreq = freq;
-        }
-        // Carry fractional SID ticks between samples so the emulated clock (and pitch) stays exact.
-        mCycleLeftover += mCyclesPerSample; // 22.34
-        const reSID::cycle_count dt = (reSID::cycle_count)mCycleLeftover; // integer part of cycles to clock -- 22
-        mCycleLeftover -= dt; // keep the fractional part for the next sample -- 0.34
+    // --- Pulse width: 0..1 -> 12-bit register, split across PW_LO and PW_HI ---
+    const int pulseReg = std::clamp(static_cast<int>(std::lround(in0(PulseWidth) * 4095.0f)), 0, 4095);
+    if (pulseReg != mPrevPulseReg) {
+        sid.write(PW_LO, static_cast<reSID::reg8>(pulseReg & 0xFF));
+        sid.write(PW_HI, static_cast<reSID::reg8>((pulseReg >> 8) & 0x0F));
+        mPrevPulseReg = pulseReg;
+    }
 
-        for (int v = 0; v < 3; v++) voice[v].wave.clock(dt);
-        for (int v = 0; v < 3; v++) voice[v].wave.synchronize();
-        for (int v = 0; v < 3; v++) voice[v].wave.set_waveform_output(dt);
+    // --- Envelope: seconds/level -> four nibbles, two per register ---
+    // Times snap to the SID's 16 rates (see kAttackSec); decay and release run ~3x slower.
+    const int attack  = nearestRateNibble(in0(Attack));
+    const int decay   = nearestRateNibble(in0(Decay) / 3.0f);
+    const int release = nearestRateNibble(in0(Release) / 3.0f);
+    const int sustain = std::clamp(static_cast<int>(std::lround(in0(Sustain) * 15.0f)), 0, 15);
+
+    const int attackDecay = (attack << 4) | decay;
+    if (attackDecay != mPrevAttackDecay) {
+        sid.write(ATTACK_DECAY, static_cast<reSID::reg8>(attackDecay));
+        mPrevAttackDecay = attackDecay;
+    }
+    const int sustainRelease = (sustain << 4) | release;
+    if (sustainRelease != mPrevSustainRelease) {
+        sid.write(SUSTAIN_RELEASE, static_cast<reSID::reg8>(sustainRelease));
+        mPrevSustainRelease = sustainRelease;
+    }
+
+    // --- Control register (upper 4 bits: waveform; bit 0: gate) ---
+    // Written after the envelope registers, so a new note starts with the current ADSR settings.
+    // Waveform is clamped to 0..15 
+    const int waveformType = std::clamp(static_cast<int>(std::lround(in0(Waveform))), 0, 15);
+    const bool gateInput   = in0(Gate) > 0.0f; // opens at > 0, like EnvGen
+    const int controlReg   = (waveformType << 4) | (gateInput ? 0x01 : 0x00);
+
+    // Update the control register when waveform or gate changes.
+    if (controlReg != mPrevControl) {
+        sid.write(CONTROL, static_cast<reSID::reg8>(controlReg));
+        mPrevControl = controlReg;
+    }
     
-        float sumVoiceOutput = 0.0f;
-        for (int v = 0; v < 3; v++) {
-            sumVoiceOutput += static_cast<float>(voice[v].wave.output() - voice[v].getWaveZero());
+    // ---------------------------------------------------------------------------
+    // Osc update: Hz -> 16-bit register, written only when it changes
+    // ---------------------------------------------------------------------------
+
+    // the older version was about 22x wrong in terms of freq...
+
+    const float outScale = gainInput / 32768.0f; // 16-bit SID output -> -1..1, times gain
+
+    for (int i = 0; i < nSamples; ++i) { // nSamples is the block size, NOT the hardware buffer size
+        // ar frequency: read a fresh value per sample.
+        if (freqIsAudioRate) {
+            writeFreq(freqInput[i]);
         }
-        float mixedOutput = sumVoiceOutput / 3.0f;
-       
-        float finalOutput = (mixedOutput / kOutNorm * mGain);
-        outputBuffer[i] = finalOutput;
+
+        // Carry fractional SID ticks between samples so the emulated clock (and pitch) stays exact.
+        mCycleLeftover += mCyclesPerSample;                                             // add ~22.34 ticks
+        const reSID::cycle_count dt = static_cast<reSID::cycle_count>(mCycleLeftover); // whole ticks: 22 or 23
+        mCycleLeftover -= dt;                                                           // keep the fraction (0–1)
+
+        sid.clock(dt);                              // oscillators, envelope, sync and filters advance by dt ticks
+        outputBuffer[i] = sid.output() * outScale;
     }
 }
-
 } // namespace SIDOsc
 PluginLoad(SIDOsc) {
     ft = inTable;
