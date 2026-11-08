@@ -10,13 +10,12 @@ SIDOsc runs a cycle-accurate emulation of the MOS 6581 / 8580 Sound Interface De
 
 | argument | default | meaning |
 |---|---|---|
-| `freq` | `440` | frequency in Hz; audio rate is read per sample |
+| `freq` | `440` | frequency in Hz, audio rate is read per sample |
 | `gain` | `1.0` | output gain |
-| `waveform` | `1` | `1` triangle, `2` saw, `4` pulse, `8` noise; add to combine (`3` = triangle + saw) |
-| `pulseWidth` | `0.5` | 0–1, the high part of each cycle is `1 − pulseWidth`; pulse waveform only |
+| `waveform` | `\tri` | `\tri`, `\saw`, `\pulse` or `\noise`; numbers `1`, `2`, `4`, `8` also work, e.g. to switch waveforms from a UGen |
+| `pulseWidth` | `0.5` | 0–1 - `0.5` is a square wave, the extremes are silent, pulse waveform only |
 | `gate` | `1` | `> 0` starts the envelope, `0` releases it |
-| `env` | `Env.adsr(0.002, 0.006, 1.0, 0.006)` | an `Env.adsr`; curve, peak level and bias are ignored |
-| `chipModel` | `0` | `0` MOS6581, `1` MOS8580; fixed when the synth starts |
+| `env` | `Env.adsr(0.002, 0.006, 1.0, 0.006)` | an `Env.adsr` - times snap to the SID's 16 rates. Curve, peak level and bias are ignored |
 
 
 ## Roadmap
