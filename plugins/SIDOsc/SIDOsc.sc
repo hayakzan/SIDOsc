@@ -1,7 +1,23 @@
 SIDOsc : UGen {
-    // waveform: 1 = triangle, 2 = saw, 4 = pulse, 8 = noise (add to combine)
-    // env: an Env.adsr; times snap to the SID's 16 rates
-    *ar { |freq = 440, gain = 1.0, waveform = 1, pulseWidth = 0.5, gate = 1, env|
+    classvar <waveforms;
+
+    *initClass {
+        waveforms = (tri: 1, saw: 2, pulse: 4, noise: 8);
+    }
+
+    // \tri, \saw, \pulse or \noise -> waveform bits.
+    // Arrays expand to multiple channels as usual; numbers and UGens pass through.
+    *waveformCode { |wf|
+        if (wf.isKindOf(Symbol)) {
+            ^waveforms[wf] ?? {
+                Error("SIDOsc: unknown waveform '%'. Use \\tri, \\saw, \\pulse or \\noise.".format(wf)).throw
+            }
+        };
+        if (wf.isKindOf(SequenceableCollection)) { ^wf.collect { |w| this.waveformCode(w) } };
+        ^wf
+    }
+
+    *ar { |freq = 440, gain = 1.0, waveform = \tri, pulseWidth = 0.5, gate = 1, env|
         var a, d, s, r;
 
         env = env ?? { Env.adsr(0.002, 0.006, 1.0, 0.006) };
@@ -14,8 +30,9 @@ SIDOsc : UGen {
         s = env.levels[2] / env.levels[1].max(1e-6);   // sustain as a fraction of peak
 
         // Order must match the Input enum in SIDOsc.hpp.
-        ^this.multiNew('audio', freq, gain, waveform, pulseWidth, gate, a, d, s, r);
+        ^this.multiNew('audio', freq, gain, this.waveformCode(waveform), pulseWidth, gate, a, d, s, r);
     }
+
     checkInputs {
         ^this.checkValidInputs;
     }
