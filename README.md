@@ -1,4 +1,4 @@
-# SIDOsc
+# SIDOsc <img src="docs/c64.jpg" height="32" alt="">
 
 **The Commodore 64's SID chip as a SuperCollider UGen.**
 
