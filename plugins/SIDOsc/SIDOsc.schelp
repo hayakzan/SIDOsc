@@ -1,26 +1,76 @@
 class:: SIDOsc
-summary:: Commodore 64 in SuperCollider
-related:: TODO
-categories:: UGens>TODO
+summary:: Commodore 64 SID voice, emulated with reSID
+related:: Classes/Pulse, Classes/LFTri, Classes/EnvGen
+categories:: UGens>Generators>Deterministic
 
 description::
+One voice of the MOS 6581 SID chip, the sound chip of the Commodore 64, emulated cycle by cycle with Dag Lem's reSID.
 
-A simple audio volume gain plugin
+SIDOsc drives the emulated chip the way a C64 program does: by writing its registers and clocking it at the PAL rate (985248 Hz), whatever the server's sample rate. Pitch, waveforms and envelopes therefore have the chip's own resolution and character.
 
+note::
+Pitch is quantized to the SID's 16-bit frequency register (steps of about 0.059 Hz), and the highest pitch is about 3.85 kHz. Envelope times snap to the chip's 16 fixed rates.
+::
 
 classmethods::
 
-method::ar, kr
+method::ar
 
-argument::TODO
+argument::freq
+Frequency in Hz. Audio-rate input is read every sample, so vibrato and FM work.
 
-argument::TODO
+argument::gain
+Output gain.
 
+argument::waveform
+The waveform, by name:
+
+table::
+## strong::name:: || strong::sound::
+## code::\tri:: || triangle
+## code::\saw:: || sawtooth
+## code::\pulse:: || pulse, set by strong::pulseWidth::
+## code::\noise:: || pitched noise
+::
+
+Numbers also work (1: triangle, 2: saw, 4: pulse, 8: noise), so the waveform can be switched from a UGen.
+
+argument::pulseWidth
+Pulse width from 0 to 1; only affects the pulse waveform. 0.5 is a square wave. Values near 0 or 1 give a thin, buzzy pulse, and the extremes are silent.
+
+argument::gate
+Greater than 0 starts the envelope (attack, decay, sustain); 0 releases it.
+
+argument::env
+An link::Classes/Env#*adsr::. Curve, peak level and bias are ignored. Times snap to the nearest of the SID's 16 rates:
+
+table::
+## strong::attack:: || 2, 8, 16, 24, 38, 56, 68, 80, 100 ms; 0.25, 0.5, 0.8, 1, 3, 5, 8 s
+## strong::decay, release:: || 6, 24, 48, 72, 114, 168, 204, 240, 300 ms; 0.75, 1.5, 2.4, 3, 9, 15, 24 s
+::
+
+For example, a 2-second attack becomes 3 seconds. Sustain has 16 levels. The default, code::Env.adsr(0.002, 0.006, 1.0, 0.006)::, behaves like a plain on/off gate.
 
 examples::
 
 code::
+// the four waveforms
+{ SIDOsc.ar(220, 0.2, \tri) ! 2 }.play;
+{ SIDOsc.ar(220, 0.2, \saw) ! 2 }.play;
+{ SIDOsc.ar(220, 0.2, \pulse) ! 2 }.play;
+{ SIDOsc.ar(220, 0.2, \noise) ! 2 }.play;
 
-{ SIDOsc.ar(/* TODO */) }.play
+// pulse-width sweep (PWM)
+{ SIDOsc.ar(110, 0.2, \pulse, SinOsc.kr(0.2).range(0.1, 0.9)) ! 2 }.play;
 
+// vibrato at audio rate
+{ SIDOsc.ar(SinOsc.ar(5).range(435, 445), 0.2, \saw) ! 2 }.play;
+
+// switching waveforms from a UGen: tri, saw, pulse, noise
+{ SIDOsc.ar(220, 0.2, Select.kr(LFSaw.kr(0.5).range(0, 4), [1, 2, 4, 8])) ! 2 }.play;
+
+// gated notes with a SID envelope
+x = { |gate = 1| SIDOsc.ar(220, 0.2, \saw, gate: gate, env: Env.adsr(0.1, 0.5, 0.4, 1.0)) ! 2 }.play;
+x.set(\gate, 0);   // release
+x.free;
 ::
